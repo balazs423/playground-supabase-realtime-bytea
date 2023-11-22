@@ -1,0 +1,184 @@
+<!DOCTYPE HTML>
+
+<html>
+
+<head>
+	<meta http-equiv='Content-Type' content='text/html; charset=UTF-8' />
+	<title>Supabase Todoapp Bytea</title>
+</head>
+
+<body>
+  <ol id='task-list'></ol>
+  <input id='task-input' type='text' placeholder='...' value='' />
+  <button id='submit-button'>Submit</button>
+
+  <script src='https://unpkg.com/@supabase/supabase-js@2'></script>
+  <script type='application/javascript'>
+
+    // Supabase
+    // --------
+    
+    const supabaseUrl = 'your supabase project url';
+    const supabaseKey = 'your supabase public key';
+    const supabaseClient = supabase.createClient(supabaseUrl, supabaseKey);
+    const supabaseSubscription = supabaseClient
+      .channel('todos-changes')
+      .on(
+        'postgres_changes',
+        {
+          table: 'todos',
+          event: '*',
+          schema: 'public'
+        },
+        payload => {
+          console.log("tasks realtime event, payload:", payload);
+          const encodedTask = payload.new.task;
+          const task = decodeTask(encodedTask);
+          setTasks([...tasks, task]);
+        }
+      )
+      .subscribe();
+    
+    async function fetchTasks() {
+      const {data, error} = await supabaseClient
+        .from('todos')
+        .select('task');
+      if (error !== null) {
+        return {success: false, reason: 'supabaseError'};
+      } else if (data === null) {
+        return {success: false, reason: 'noData'};
+      } else {
+        return {success: true, tasks: data.map(record => decodeTask(record.task))};
+      }
+    }
+
+    async function saveTask(task) {
+      const encodedTask = encodeTask(task);
+      const {error} = await supabaseClient
+        .from('todos')
+        .insert([{task: encodedTask}]);
+      if (error !== null) {
+        return {success: false}
+      } else {
+        return {success: true}
+      }
+    }
+
+    // State
+    // -----
+
+    let tasks = [];
+
+    function setTasks(newTasks) {
+      tasks = newTasks;
+      render();
+    }
+
+    // DOM
+    // ---
+  
+    const taskList = document.getElementById('task-list');
+    const taskInput = document.getElementById('task-input');
+    const submitButton = document.getElementById('submit-button');
+
+    function render() {
+      const listItems = tasks.map(task => {
+        const li = document.createElement('li');
+        li.innerText = task;
+        return li;
+      });
+      taskList.replaceChildren(...listItems);
+    }
+
+    // Init
+    // ----
+
+    fetchTasks().then(result => {
+      if (result.success) {
+        setTasks(result.tasks);
+      }
+    });
+
+    submitButton.addEventListener('click', async () => {
+      const task = taskInput.value;
+      if (task === 0) return;
+
+      const saveResult = await saveTask(task);
+      if (saveResult.success) {
+        taskInput.value = '';
+      } else {
+        alert('Could not save task');
+      }
+    });
+
+    // Coding
+    // ------
+
+    function encodeTask(task) {
+      return stringToHex(task);
+    }
+
+    function decodeTask(encodedTask) {
+      return hexToString(encodedTask);
+    }
+
+    function stringToHex(string) {
+      const bytes = stringToBytes(string);
+      return bytesToHex(bytes);
+    }
+
+    function hexToString(hex) {
+      const bytes = hexToBytes(hex);
+      return bytesToString(bytes);
+    }
+
+    const byteToHexOctetMap = new Map();
+    for (let n = 0; n <= 0xff; ++n) {
+      const hexOctet = n.toString(16).padStart(2, '0');
+      byteToHexOctetMap.set(n, hexOctet);
+    }
+
+    const hexOctetToByteMap = new Map();
+    for (let n = 0; n <= 0xff; ++n) {
+      const hexOctet = n.toString(16).padStart(2, '0');
+      hexOctetToByteMap.set(hexOctet, n);
+    }
+
+    function bytesToHex(bytes) {
+      const hexOctets = new Array(bytes.length);
+      for (let i = 0; i < bytes.length; i++) {
+        const byte = bytes[i];
+        const hexOctet = byteToHexOctetMap.get(byte);
+        if (hexOctet === undefined) throw new Error(`Unknown byte: ${byte}`);
+        hexOctets[i] = hexOctet;
+      }
+      const hexOctetsJoined = hexOctets.join('');
+      return '\\x' + hexOctetsJoined;
+    }
+
+    function hexToBytes(hex) {
+      const hexOctetsJoined = hex.replace(/^\\x/, '');
+      const bytes = new Uint8Array(hexOctetsJoined.length / 2);
+      for (let i = 0; i < hexOctetsJoined.length / 2; i++) {
+        const hexOctet = hexOctetsJoined.substring(2 * i, 2 * i + 2);
+        const byte = hexOctetToByteMap.get(hexOctet);
+        if (byte === undefined) throw new Error(`Unknown hex octet: ${hexOctet}`);
+        bytes[i] = byte;
+      }
+      return bytes;
+    }
+
+    function bytesToString(bytes) {
+      const decoder = new TextDecoder('utf-8');
+      return decoder.decode(bytes);
+    }
+
+    function stringToBytes(string) {
+      const encoder = new TextEncoder();
+      return encoder.encode(string);
+    }
+
+</script>
+</body>
+
+</html>
